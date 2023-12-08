@@ -25,63 +25,8 @@ from django.core.exceptions import ObjectDoesNotExist
 import calendar
 from rest_framework import serializers
 
-# @csrf_exempt
-# @require_POST
-# def register(request):
-#     data = json.loads(request.body.decode('utf-8'))
-
-#     if 'email' not in data:
-#         return JsonResponse({'error': 'Email address is required'}, status=400)
-
-#     email = data['email']
-#     otp = get_random_string(length=6, allowed_chars='0123456789')
-
-#     cache.set(email, otp, timeout=300)
-#     username = email.split('@')[0]
-#     user = User(username=username, email=email)
-
-#     subject = 'Registration OTP'
-#     message = f'Your OTP for registration is: {otp}'
-#     from_email = settings.DEFAULT_FROM_EMAIL
-#     recipient_list = [email]
-
-#     try:
-#         user.save()
-#         send_mail(subject, message, from_email, recipient_list)
-#         return JsonResponse({'message': 'OTP sent successfully'}, status=200)
-#     except IntegrityError:
-#         return JsonResponse({'error': 'Username or email already exists. Please try again.'}, status=400)
-#     except Exception as e:
-#         return JsonResponse({'error': f'Error saving user or sending email: {str(e)}'}, status=500)
-
-    
-
-# User = get_user_model()
-
-# @csrf_exempt
-# @require_POST
-# def verify_otp(request):
-#     data = json.loads(request.body.decode('utf-8'))
-
-#     if 'email' not in data or 'otp' not in data:
-#         return JsonResponse({'error': 'Email and OTP are required'}, status=400)
-
-#     email = data['email']
-#     user_entered_otp = data['otp']
-#     stored_otp = cache.get(email)
-
-#     if stored_otp is None:
-#         return JsonResponse({'error': 'OTP expired or not found. Please request a new OTP.'}, status=400)
-#     if user_entered_otp == stored_otp:
-#         user, created = User.objects.get_or_create(email=email)
-#         refresh = RefreshToken.for_user(user)
-#         access_token = str(refresh.access_token)
-#         return JsonResponse({'message': 'OTP verified successfully', 'access_token': access_token}, status=200)
-#     else:
-#         return JsonResponse({'error': 'Invalid OTP'}, status=400)
 
 
-User = get_user_model()
 
 @csrf_exempt
 @require_POST
@@ -94,26 +39,42 @@ def register(request):
                 return JsonResponse({'error': 'Email address is required'}, status=400)
 
             email = data['email']
-            otp = get_random_string(length=6, allowed_chars='0123456789')
 
-            cache.set(email, otp, timeout=300)
-            username = email.split('@')[0]
-            user = User(username=username, email=email)
+            # Check if a user with the email exists and is not active
+            try:
+                existing_user = User.objects.get(email=email, is_active=False)
+                # Resend OTP to the existing user
+                otp = get_random_string(length=6, allowed_chars='0123456789')
+                cache.set(email, otp, timeout=300)
+                
+                subject = 'Registration OTP'
+                message = f'Your OTP for registration is: {otp}'
+                from_email = settings.DEFAULT_FROM_EMAIL
+                recipient_list = [email]
 
-            subject = 'Registration OTP'
-            message = f'Your OTP for registration is: {otp}'
-            from_email = settings.DEFAULT_FROM_EMAIL
-            recipient_list = [email]
+                send_mail(subject, message, from_email, recipient_list)
 
-            user.save()
-            send_mail(subject, message, from_email, recipient_list)
+                return JsonResponse({'message': 'OTP resent successfully'}, status=200)
 
-            return JsonResponse({'message': 'OTP sent successfully'}, status=200)
+            except ObjectDoesNotExist:
+                # User with the email does not exist or is already active
+                otp = get_random_string(length=6, allowed_chars='0123456789')
+                cache.set(email, otp, timeout=300)
+                username = email.split('@')[0]
+                user = User(username=username, email=email, is_active=False)
+                user.save()
 
-    except IntegrityError:
-        return JsonResponse({'error': 'Username or email already exists. Please try again.'}, status=400)
+                subject = 'Registration OTP'
+                message = f'Your OTP for registration is: {otp}'
+                from_email = settings.DEFAULT_FROM_EMAIL
+                recipient_list = [email]
+
+                send_mail(subject, message, from_email, recipient_list)
+
+                return JsonResponse({'message': 'OTP sent successfully'}, status=200)
+
     except Exception as e:
-        return JsonResponse({'error': f'Error saving user or sending email: {str(e)}'}, status=500)
+        return JsonResponse({'error': f'Error registering user or sending email: {str(e)}'}, status=500)
 
 @csrf_exempt
 @require_POST
@@ -134,6 +95,9 @@ def verify_otp(request):
 
             if user_entered_otp == stored_otp:
                 user = User.objects.get(email=email)
+                user.is_active = True  # Mark the user as active after OTP is verified
+                user.save()
+
                 refresh = RefreshToken.for_user(user)
                 access_token = str(refresh.access_token)
                 return JsonResponse({'message': 'OTP verified successfully', 'access_token': access_token}, status=200)
